@@ -9,7 +9,7 @@ import wandb
 
 from t5_utils import initialize_model, initialize_optimizer_and_scheduler, save_model, load_model_from_checkpoint, setup_wandb
 from transformers import GenerationConfig
-from load_data import load_t5_data
+from load_data import load_t5_data, LT_TOKEN
 from utils import compute_metrics, save_queries_and_records
 
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -203,9 +203,10 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
             # Convert generated token IDs into SQL strings
             batch_queries = tokenizer.batch_decode(
                 generated_ids,
-                skip_special_tokens=True
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False     # NEW: keep SQL spacing exactly
             )
-
+            batch_queries = [q.replace(LT_TOKEN, "<") for q in batch_queries]   # NEW: placeholder → '<'
             generated_queries.extend(batch_queries)
 
     # Average validation loss per token
@@ -276,9 +277,10 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
             # Decode token IDs into SQL strings
             batch_queries = tokenizer.batch_decode(
                 generated_ids,
-                skip_special_tokens=True
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False     # NEW: keep SQL spacing exactly
             )
-
+            batch_queries = [q.replace(LT_TOKEN, "<") for q in batch_queries]   # NEW: placeholder → '<'
             generated_queries.extend(batch_queries)
 
     # Create output directories

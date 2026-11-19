@@ -12,6 +12,7 @@ from transformers import T5TokenizerFast
 import torch
 
 PAD_IDX = 0
+LT_TOKEN = "LESSTHAN"
 
 class T5Dataset(Dataset):
 
@@ -75,6 +76,7 @@ class T5Dataset(Dataset):
             else:
 
                 sql = sql_lines[i]
+                sql = sql.replace("<", LT_TOKEN) # NEW: '<' → placeholder before tokenizing
 
                 # 2. Tokenize SQL target
                 decoder_targets = tokenizer.encode(
