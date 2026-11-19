@@ -1,7 +1,7 @@
 import os
 import argparse
 from tqdm import tqdm
-
+from transformers import T5TokenizerFast
 import torch
 import torch.nn as nn
 import numpy as np
@@ -138,16 +138,160 @@ def eval_epoch(args, model, dev_loader, gt_sql_pth, model_sql_path, gt_record_pa
     should both provide good results. If you find that this component of evaluation takes too long with your compute,
     we found the cross-entropy loss (in the evaluation set) to be well (albeit imperfectly) correlated with F1 performance.
     '''
-    # TODO
+
+
     model.eval()
-    return 0, 0, 0, 0, 0
+
+    tokenizer = T5TokenizerFast.from_pretrained(
+        "google-t5/t5-small"
+    )
+
+    criterion = nn.CrossEntropyLoss()
+
+    total_loss = 0
+    total_tokens = 0
+
+    generated_queries = []
+
+    with torch.no_grad():
+
+        for encoder_input, encoder_mask, decoder_input, decoder_targets, initial_decoder_inputs in tqdm(dev_loader):
+
+            # Move tensors to device
+            encoder_input = encoder_input.to(DEVICE)
+            encoder_mask = encoder_mask.to(DEVICE)
+            decoder_input = decoder_input.to(DEVICE)
+            decoder_targets = decoder_targets.to(DEVICE)
+            initial_decoder_inputs = initial_decoder_inputs.to(DEVICE)
+
+            # ---------------------------------
+            # 1. Calculate validation loss
+            # ---------------------------------
+
+            outputs = model(
+                input_ids=encoder_input,
+                attention_mask=encoder_mask,
+                decoder_input_ids=decoder_input
+            )
+
+            logits = outputs.logits
+
+            non_pad = decoder_targets != PAD_IDX
+
+            loss = criterion(
+                logits[non_pad],
+                decoder_targets[non_pad]
+            )
+
+            num_tokens = torch.sum(non_pad).item()
+
+            total_loss += loss.item() * num_tokens
+            total_tokens += num_tokens
+
+            # ---------------------------------
+            # 2. Generate SQL queries
+            # ---------------------------------
+
+            generated_ids = model.generate(
+                input_ids=encoder_input,
+                attention_mask=encoder_mask,
+                decoder_input_ids=initial_decoder_inputs,
+                max_length=512,
+                num_beams=1
+            )
+
+            # Convert generated token IDs into SQL strings
+            batch_queries = tokenizer.batch_decode(
+                generated_ids,
+                skip_special_tokens=True
+            )
+
+            generated_queries.extend(batch_queries)
+
+    # Average validation loss per token
+    eval_loss = total_loss / max(total_tokens, 1)
+
+    # ---------------------------------
+    # 3. Save generated queries and records
+    # ---------------------------------
+
+    os.makedirs(os.path.dirname(model_sql_path), exist_ok=True)
+    os.makedirs(os.path.dirname(model_record_path), exist_ok=True)
+
+    save_queries_and_records(
+        generated_queries,
+        model_sql_path,
+        model_record_path
+    )
+
+    # ---------------------------------
+    # 4. Calculate SQL and record metrics
+    # ---------------------------------
+
+    sql_em, record_em, record_f1, error_msgs = compute_metrics(
+        gt_sql_pth,
+        model_sql_path,
+        gt_record_path,
+        model_record_path
+    )
+
+    error_rate = sum(
+        1 for msg in error_msgs if msg
+    ) / max(len(error_msgs), 1)
+
+    return eval_loss, record_f1, record_em, sql_em, error_rate
+
         
 def test_inference(args, model, test_loader, model_sql_path, model_record_path):
     '''
     You must implement inference to compute your model's generated SQL queries and its associated 
     database records. Implementation should be very similar to eval_epoch.
     '''
-    pass
+
+    model.eval()
+
+    tokenizer = T5TokenizerFast.from_pretrained(
+        "google-t5/t5-small"
+    )
+
+    generated_queries = []
+
+    with torch.no_grad():
+
+        for encoder_input, encoder_mask, initial_decoder_inputs in tqdm(test_loader):
+
+            encoder_input = encoder_input.to(DEVICE)
+            encoder_mask = encoder_mask.to(DEVICE)
+            initial_decoder_inputs = initial_decoder_inputs.to(DEVICE)
+
+            # Generate SQL
+            generated_ids = model.generate(
+                input_ids=encoder_input,
+                attention_mask=encoder_mask,
+                decoder_input_ids=initial_decoder_inputs,
+                max_length=512,
+                num_beams=1
+            )
+
+            # Decode token IDs into SQL strings
+            batch_queries = tokenizer.batch_decode(
+                generated_ids,
+                skip_special_tokens=True
+            )
+
+            generated_queries.extend(batch_queries)
+
+    # Create output directories
+    os.makedirs(os.path.dirname(model_sql_path), exist_ok=True)
+    os.makedirs(os.path.dirname(model_record_path), exist_ok=True)
+
+    # Save SQL queries and their database records
+    save_queries_and_records(
+        generated_queries,
+        model_sql_path,
+        model_record_path
+    )
+
 
 def main():
     # Get key arguments

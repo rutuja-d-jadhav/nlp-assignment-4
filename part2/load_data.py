@@ -26,16 +26,83 @@ class T5Dataset(Dataset):
               T5Tokenizer should serve that purpose.
             * Class behavior should be different on the test set.
         '''
-        # TODO
+
+        self.tokenizer = T5TokenizerFast.from_pretrained(
+            "google-t5/t5-small"
+        )
+
+        self.split = split
+
+        self.data = self.process_data(
+            data_folder,
+            split,
+            self.tokenizer
+        )
 
     def process_data(self, data_folder, split, tokenizer):
-        # TODO
-    
+
+        # Read natural language inputs
+        nl_path = os.path.join(data_folder, f"{split}.nl")
+        nl_lines = load_lines(nl_path)
+
+        # Test set has no ground-truth SQL
+        if split != "test":
+            sql_path = os.path.join(data_folder, f"{split}.sql")
+            sql_lines = load_lines(sql_path)
+
+            assert len(nl_lines) == len(sql_lines)
+
+        processed_data = []
+
+        for i, nl in enumerate(nl_lines):
+
+            # 1. Tokenize encoder input
+            encoder_ids = tokenizer.encode(
+                nl,
+                add_special_tokens=True
+            )
+
+            # T5 uses the PAD token as its decoder start token
+            initial_decoder_input = [tokenizer.pad_token_id]
+
+            if split == "test":
+
+                processed_data.append((
+                    torch.tensor(encoder_ids, dtype=torch.long),
+                    torch.tensor(initial_decoder_input, dtype=torch.long)
+                ))
+
+            else:
+
+                sql = sql_lines[i]
+
+                # 2. Tokenize SQL target
+                decoder_targets = tokenizer.encode(
+                    sql,
+                    add_special_tokens=True
+                )
+
+                # 3. Shift right to create decoder inputs
+                decoder_inputs = (
+                    [tokenizer.pad_token_id]
+                    + decoder_targets[:-1]
+                )
+
+                processed_data.append((
+                    torch.tensor(encoder_ids, dtype=torch.long),
+                    torch.tensor(decoder_inputs, dtype=torch.long),
+                    torch.tensor(decoder_targets, dtype=torch.long),
+                    torch.tensor(initial_decoder_input, dtype=torch.long)
+                ))
+
+        return processed_data
+
     def __len__(self):
-        # TODO
+        return len(self.data)
 
     def __getitem__(self, idx):
-        # TODO
+        return self.data[idx]
+
 
 def normal_collate_fn(batch):
     '''
@@ -53,8 +120,52 @@ def normal_collate_fn(batch):
         * decoder_targets: The target tokens with which to train the decoder (the tokens following each decoder input)
         * initial_decoder_inputs: The very first input token to be decoder (only to be used in evaluation)
     '''
-    # TODO
-    return [], [], [], [], []
+
+
+
+    encoder_inputs = [item[0] for item in batch]
+    decoder_inputs = [item[1] for item in batch]
+    decoder_targets = [item[2] for item in batch]
+    initial_decoder_inputs = [item[3] for item in batch]
+
+    # Pad encoder inputs
+    encoder_ids = pad_sequence(
+        encoder_inputs,
+        batch_first=True,
+        padding_value=PAD_IDX
+    )
+
+    # Create encoder attention mask
+    encoder_mask = (encoder_ids != PAD_IDX).long()
+
+    # Pad decoder inputs
+    decoder_inputs = pad_sequence(
+        decoder_inputs,
+        batch_first=True,
+        padding_value=PAD_IDX
+    )
+
+    # Pad decoder targets
+    decoder_targets = pad_sequence(
+        decoder_targets,
+        batch_first=True,
+        padding_value=PAD_IDX
+    )
+
+    # All examples start decoding with the PAD token
+    initial_decoder_inputs = torch.stack(
+        initial_decoder_inputs
+    )
+
+    return (
+        encoder_ids,
+        encoder_mask,
+        decoder_inputs,
+        decoder_targets,
+        initial_decoder_inputs
+    )
+
+    #return [], [], [], [], []
 
 def test_collate_fn(batch):
     '''
@@ -69,8 +180,30 @@ def test_collate_fn(batch):
         * encoder_mask: Mask of shape BxT associated with padding tokens in the encoder input
         * initial_decoder_inputs: The very first input token to be decoder (only to be used in evaluation)
     '''
-    # TODO
-    return [], [], []
+
+
+
+    encoder_inputs = [item[0] for item in batch]
+    initial_decoder_inputs = [item[1] for item in batch]
+
+    encoder_ids = pad_sequence(
+        encoder_inputs,
+        batch_first=True,
+        padding_value=PAD_IDX
+    )
+
+    encoder_mask = (encoder_ids != PAD_IDX).long()
+
+    initial_decoder_inputs = torch.stack(
+        initial_decoder_inputs
+    )
+
+    return (
+        encoder_ids,
+        encoder_mask,
+        initial_decoder_inputs
+    )
+
 
 def get_dataloader(batch_size, split):
     data_folder = 'data'
