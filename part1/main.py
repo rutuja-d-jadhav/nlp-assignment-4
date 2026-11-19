@@ -45,7 +45,36 @@ def do_train(args, model, train_dataloader, save_dir="./out"):
     # You can use progress_bar.update(1) to see the progress during training
     # You can refer to the pytorch tutorial covered in class for reference
 
-    raise NotImplementedError
+    #raise NotImplementedError
+    for epoch in range(num_epochs):
+
+        for batch in train_dataloader:
+
+            # 1. Move batch to GPU (or CPU)
+            batch = {k: v.to(device) for k, v in batch.items()}
+
+            # 2. Forward pass
+            outputs = model(**batch)
+
+            # 3. Get loss
+            loss = outputs.loss
+
+            # 4. Backpropagation
+            loss.backward()
+
+            # 5. Update model parameters
+            optimizer.step()
+
+            # 6. Update learning rate
+            lr_scheduler.step()
+
+            # 7. Clear accumulated gradients
+            optimizer.zero_grad()
+
+            # 8. Update progress bar
+            progress_bar.update(1)
+
+
 
     ##### YOUR CODE ENDS HERE ######
 
@@ -93,11 +122,62 @@ def create_augmented_dataloader(args, dataset):
     # dataloader will be for the original training split augmented with 5k random transformed examples from the training set.
     # You may find it helpful to see how the dataloader was created at other place in this code.
 
-    raise NotImplementedError
+    #raise NotImplementedError
+
+
+    # 1. Get the original training dataset
+    original_train_dataset = dataset["train"]
+
+    # 2. Randomly select 5,000 training examples
+    selected_dataset = original_train_dataset.shuffle(
+        seed=42
+    ).select(range(5000))
+
+    # 3. Apply our typo transformation
+    transformed_dataset = selected_dataset.map(
+        custom_transform,
+        load_from_cache_file=False
+    )
+
+    # 4. Combine original and transformed datasets
+    augmented_dataset = datasets.concatenate_datasets([
+        original_train_dataset,
+        transformed_dataset
+    ])
+
+    # 5. Tokenize the augmented dataset
+    tokenized_dataset = augmented_dataset.map(
+        tokenize_function,
+        batched=True,
+        load_from_cache_file=False
+    )
+
+    # 6. Remove raw text
+    tokenized_dataset = tokenized_dataset.remove_columns(
+        ["text"]
+    )
+
+    # 7. Rename label to labels (Hugging Face convention)
+    tokenized_dataset = tokenized_dataset.rename_column(
+        "label", "labels"
+    )
+
+    # 8. Convert dataset columns to PyTorch tensors
+    tokenized_dataset.set_format("torch")
+
+    # 9. Create shuffled DataLoader
+    train_dataloader = DataLoader(
+        tokenized_dataset,
+        shuffle=True,
+        batch_size=args.batch_size
+    )
+
+    return train_dataloader
+
 
     ##### YOUR CODE ENDS HERE ######
 
-    return train_dataloader
+
 
 
 # Create a dataloader for the transformed test set
