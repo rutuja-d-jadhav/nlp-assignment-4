@@ -17,7 +17,7 @@ from nltk.tokenize.treebank import TreebankWordDetokenizer
 
 random.seed(0)
 
-TYPO_PROB = 0.10
+TYPO_PROB = 0.30
 
 QWERTY_NEIGHBORS = {
     "a": "qwsz",
